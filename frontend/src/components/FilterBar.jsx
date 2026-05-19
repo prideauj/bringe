@@ -6,6 +6,8 @@ export const DEFAULT_FILTERS = {
   venue_slug: "",
   max_price: "",
   min_rating: "",
+  min_time: "",
+  max_time: "",
   free_only: false,
   accessible: false,
 };
@@ -50,6 +52,8 @@ export default function FilterBar({ genres, venues, filters, onChange }) {
       filters.venue_slug,
       filters.max_price,
       filters.min_rating,
+      filters.min_time,
+      filters.max_time,
       filters.free_only,
       filters.accessible,
     ].filter(Boolean).length;
@@ -183,6 +187,41 @@ export default function FilterBar({ genres, venues, filters, onChange }) {
               placeholder="Any"
               className="bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white w-full focus:outline-none focus:border-fringe-pink"
             />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-gray-500">
+              Time range
+              {(filters.min_time || filters.max_time) && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    set("min_time", "");
+                    set("max_time", "");
+                  }}
+                  className="ml-1 text-fringe-pink hover:underline"
+                  title="Clear time range"
+                >
+                  clear
+                </button>
+              )}
+            </label>
+            <div className="flex items-center gap-1">
+              <input
+                type="time"
+                value={filters.min_time || ""}
+                onChange={(e) => set("min_time", e.target.value)}
+                title="From"
+                className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white focus:outline-none focus:border-fringe-pink min-w-0 flex-1"
+              />
+              <span className="text-gray-500 text-xs flex-shrink-0">to</span>
+              <input
+                type="time"
+                value={filters.max_time || ""}
+                onChange={(e) => set("max_time", e.target.value)}
+                title="Until"
+                className="bg-gray-800 border border-gray-700 rounded-lg px-2 py-2 text-sm text-white focus:outline-none focus:border-fringe-pink min-w-0 flex-1"
+              />
+            </div>
           </div>
           <div className="flex flex-col gap-1">
             <label className="text-xs text-gray-500 flex items-center gap-1">

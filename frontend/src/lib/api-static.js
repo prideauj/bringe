@@ -43,6 +43,8 @@ export async function fetchShows(params = {}) {
     min_price,
     max_price,
     min_rating,
+    min_time,
+    max_time,
     free_only,
     accessible,
     sort = "next_date",
@@ -53,6 +55,22 @@ export async function fetchShows(params = {}) {
   const dset = dates && dates.length ? new Set(dates) : null;
   const gset = genres && genres.length ? new Set(genres) : null;
   const term = q ? q.toLowerCase() : null;
+  const minPrice = min_price !== "" && min_price != null ? parseFloat(min_price) : null;
+  const maxPrice = max_price !== "" && max_price != null ? parseFloat(max_price) : null;
+  const perfFilterActive =
+    dset || free_only || minPrice != null || maxPrice != null || min_time || max_time;
+
+  function _perfMatches(p) {
+    if (dset && !dset.has(p.date)) return false;
+    if (free_only && p.standard_price !== 0) return false;
+    if (minPrice != null && (p.standard_price == null || p.standard_price < minPrice))
+      return false;
+    if (maxPrice != null && (p.standard_price == null || p.standard_price > maxPrice))
+      return false;
+    if (min_time && (!p.time || p.time < min_time)) return false;
+    if (max_time && (!p.time || p.time > max_time)) return false;
+    return true;
+  }
 
   let rows = all.filter((s) => {
     if (term) {
@@ -74,18 +92,13 @@ export async function fetchShows(params = {}) {
       if ((s.avg_rating || 0) < parseFloat(min_rating)) return false;
     }
 
-    const perfs = s._perfs || [];
-    if (dset && !perfs.some((p) => dset.has(p.date))) return false;
-    if (free_only && !perfs.some((p) => p.standard_price === 0)) return false;
-    if (min_price != null && min_price !== "") {
-      const v = parseFloat(min_price);
-      if (!perfs.some((p) => p.standard_price != null && p.standard_price >= v))
-        return false;
-    }
-    if (max_price != null && max_price !== "") {
-      const v = parseFloat(max_price);
-      if (!perfs.some((p) => p.standard_price != null && p.standard_price <= v))
-        return false;
+    // Performance-row filters: a show passes if SOME single performance
+    // satisfies ALL active perf-row conditions together. (Mirrors the
+    // backend's outerjoin + WHERE, where ANDed predicates have to be
+    // true on the SAME row.)
+    if (perfFilterActive) {
+      const perfs = s._perfs || [];
+      if (!perfs.some(_perfMatches)) return false;
     }
     return true;
   });
@@ -177,6 +190,8 @@ export async function fetchReviews(params = {}) {
     dates,
     min_price,
     max_price,
+    min_time,
+    max_time,
     free_only,
     accessible,
     limit = 500,
@@ -185,6 +200,22 @@ export async function fetchReviews(params = {}) {
   const dset = dates && dates.length ? new Set(dates) : null;
   const gset = genres && genres.length ? new Set(genres) : null;
   const term = q ? q.toLowerCase() : null;
+  const minPrice = min_price !== "" && min_price != null ? parseFloat(min_price) : null;
+  const maxPrice = max_price !== "" && max_price != null ? parseFloat(max_price) : null;
+  const perfFilterActive =
+    dset || free_only || minPrice != null || maxPrice != null || min_time || max_time;
+
+  function _perfMatches(p) {
+    if (dset && !dset.has(p.date)) return false;
+    if (free_only && p.standard_price !== 0) return false;
+    if (minPrice != null && (p.standard_price == null || p.standard_price < minPrice))
+      return false;
+    if (maxPrice != null && (p.standard_price == null || p.standard_price > maxPrice))
+      return false;
+    if (min_time && (!p.time || p.time < min_time)) return false;
+    if (max_time && (!p.time || p.time > max_time)) return false;
+    return true;
+  }
 
   const rows = reviews.filter((r) => {
     if (min_rating != null && min_rating !== "") {
@@ -214,18 +245,9 @@ export async function fetchReviews(params = {}) {
     if (accessible && !(s._accessibility_features && s._accessibility_features.length)) {
       return false;
     }
-    const perfs = s._perfs || [];
-    if (dset && !perfs.some((p) => dset.has(p.date))) return false;
-    if (free_only && !perfs.some((p) => p.standard_price === 0)) return false;
-    if (min_price != null && min_price !== "") {
-      const v = parseFloat(min_price);
-      if (!perfs.some((p) => p.standard_price != null && p.standard_price >= v))
-        return false;
-    }
-    if (max_price != null && max_price !== "") {
-      const v = parseFloat(max_price);
-      if (!perfs.some((p) => p.standard_price != null && p.standard_price <= v))
-        return false;
+    if (perfFilterActive) {
+      const perfs = s._perfs || [];
+      if (!perfs.some(_perfMatches)) return false;
     }
     return true;
   });

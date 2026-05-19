@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+import textwrap
 from datetime import datetime, timezone
 from pathlib import Path
 from collections import Counter
@@ -93,6 +94,11 @@ def _show_summary(show: Show) -> dict:
         "venue_lat":  venue.lat  if venue else None,
         "venue_lng":  venue.lng  if venue else None,
         "min_price": min_price,
+        "summary": (
+            textwrap.shorten(show.description, width=440, placeholder="…")
+            if show.description
+            else None
+        ),
         "next_date": chosen.date if chosen else None,
         "next_time": chosen.time if chosen else None,
         # `times` is empty here -- it's a date-filter-derived field;

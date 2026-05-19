@@ -44,6 +44,8 @@ export default function ReviewsView({
     if (filters.min_rating !== "" && filters.min_rating != null) {
       params.min_rating = filters.min_rating;
     }
+    if (filters.min_time) params.min_time = filters.min_time;
+    if (filters.max_time) params.max_time = filters.max_time;
     if (filters.free_only) params.free_only = true;
     if (filters.accessible) params.accessible = true;
     if (source) params.source = source;

@@ -218,6 +218,88 @@ def parse_date(text: str) -> Optional[str]:
     return None
 
 
+def _extract_description(soup: BeautifulSoup) -> str:
+    """Return the show's body description. Tries the page's canonical
+    block first, then JSON-LD, then meta tags, then a heuristic paragraph
+    scan. Suffixes of the form ' - <Venue> - <date>, <date>, ...' that
+    Yoast appends to the meta/JSON-LD versions are stripped."""
+    import json as _json
+
+    def _strip_suffix(text: str) -> str:
+        # Yoast/Brighton-Fringe pattern:
+        # "<description> - <Venue Name> - Tue 5th 2026, Tue 12th 2026, ..."
+        # Cut from the last " - <Capitalised word>" that is followed
+        # somewhere by a date-looking token.
+        m = re.search(
+            r"\s*-\s*[^-\n]+?-\s*(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)[a-z]*\s+\d.*$",
+            text,
+        )
+        if m:
+            return text[: m.start()].strip()
+        return text.strip()
+
+    # 1) Eventotron's .etron-description div -- the canonical full body.
+    etron = soup.find(class_=re.compile(r"etron-description", re.I))
+    if etron:
+        # <br> separators -> spaces, then collapse whitespace.
+        for br in etron.find_all("br"):
+            br.replace_with(" ")
+        text = etron.get_text(" ", strip=True)
+        if text:
+            return re.sub(r"\s+", " ", text)
+
+    # 2) JSON-LD `description` (Yoast schema graph). Strip the venue+
+    # date suffix that gets appended automatically.
+    for script in soup.find_all("script", type="application/ld+json"):
+        raw = script.string or script.get_text() or ""
+        try:
+            data_ld = _json.loads(raw)
+        except Exception:
+            continue
+        items = data_ld if isinstance(data_ld, list) else [data_ld]
+        graph = []
+        for it in items:
+            if isinstance(it, dict) and isinstance(it.get("@graph"), list):
+                graph.extend(it["@graph"])
+            elif isinstance(it, dict):
+                graph.append(it)
+        for it in graph:
+            desc = it.get("description") if isinstance(it, dict) else None
+            if isinstance(desc, str) and len(desc) > 40:
+                return _strip_suffix(desc)
+
+    # 3) <meta name="description"> / og:description.
+    for sel in (
+        {"name": "description"},
+        {"property": "og:description"},
+    ):
+        meta = soup.find("meta", attrs=sel)
+        if meta:
+            content = meta.get("content") or ""
+            if content.strip():
+                return _strip_suffix(content)
+
+    # 4) Last resort: longest paragraph block in a generic content
+    # container.
+    container = (
+        soup.find(class_=re.compile(r"entry.?content|post.?content|main.?content", re.I))
+        or soup.find("article")
+        or soup.find("main")
+    )
+    if container:
+        for tag in container.find_all(["nav", "aside", "header", "footer", "form"]):
+            tag.decompose()
+        paragraphs = [
+            p.get_text(" ", strip=True)
+            for p in container.find_all("p")
+            if len(p.get_text(strip=True)) > 40
+        ]
+        if paragraphs:
+            return " ".join(paragraphs[:4])
+
+    return ""
+
+
 def parse_time(text: str) -> Optional[str]:
     """Return HH:MM from '7:30 pm', '19:30', '7.30pm', '7pm'."""
     # Hour:Minute (with optional am/pm) — the most specific form.
@@ -277,27 +359,55 @@ def parse_show_page(url: str, html: str) -> ShowData:
             data.genre = m.group(1).strip()
 
     # --- Company / Presented by ---
-    company_el = soup.find(class_=re.compile(r"company|presenter|artist|by\b", re.I))
-    if company_el:
-        data.company = _text(company_el)
-    else:
-        m = re.search(r"(?:Company|Presented by|By)[:\s]+([^\n]+)", page_text, re.I)
+    # Brighton Fringe renders this as
+    #   <strong>Company:</strong> Brighton and District Organists Association
+    # i.e. a label tag immediately followed by a text node. The previous
+    # extraction strategy (class-based, or a `[^\n]+` page-text capture)
+    # over-shot massively because the page packs every labelled field
+    # onto a single logical line, so the company ended up containing the
+    # genre, duration, performer list and half the description.
+    data.company = ""
+    for strong in soup.find_all("strong"):
+        label = _text(strong).rstrip(":").strip().lower()
+        if label not in ("company", "presented by", "presenter", "by"):
+            continue
+        nxt = strong.next_sibling
+        if nxt is None:
+            continue
+        if isinstance(nxt, str):
+            data.company = nxt.strip()
+        else:
+            # An element sibling -- take just its visible text, no recursion
+            # into deeper labelled sections.
+            data.company = nxt.get_text(" ", strip=True)
+        break
+
+    if not data.company:
+        # Page-text fallback. Stop at the next known label so we don't
+        # spill into Genre / Duration / Venue / Age sections.
+        m = re.search(
+            r"(?:Company|Presented\s+by|Presenter)\s*:\s*"
+            r"([^\n]{1,200}?)"
+            r"(?:\s*(?:Genre|Duration|Venue|Age\s+suitability|Babes|Content\s+Warnings|Suitable\s+for)\b|\n|$)",
+            page_text,
+            re.I,
+        )
         if m:
             data.company = m.group(1).strip()
 
+    # Final guardrail: company names are usually short. If we still ended
+    # up with a paragraph of description text, drop it rather than
+    # propagating the bug to the UI.
+    if data.company and len(data.company) > 150:
+        data.company = ""
+
     # --- Description ---
-    # Take the longest paragraph block that isn't navigation/meta
-    desc_el = (
-        soup.find(class_=re.compile(r"description|content|summary|show.?desc|entry.?content", re.I))
-        or soup.find("article")
-        or soup.find("main")
-    )
-    if desc_el:
-        # Remove nav, aside, header, footer from description block
-        for tag in desc_el.find_all(["nav", "aside", "header", "footer", "form"]):
-            tag.decompose()
-        paragraphs = [p.get_text(strip=True) for p in desc_el.find_all("p") if len(p.get_text(strip=True)) > 40]
-        data.description = " ".join(paragraphs[:4])  # First four meaningful paragraphs
+    # Brighton Fringe (Eventotron plugin) puts the full show description
+    # inside `<div class="etron-description">` as plain text, separated
+    # by <br> rather than <p> tags. The old "find <p> children" approach
+    # captured nothing here, so we'd silently fall back to a different
+    # container and lose the opening sentence or the whole body.
+    data.description = _extract_description(soup)
 
     # --- Duration ---
     duration_el = soup.find(class_=re.compile(r"duration|runtime|length", re.I))

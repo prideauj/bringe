@@ -98,6 +98,17 @@ export default function ShowCard({ show, onClick }) {
           </p>
         )}
 
+        {/* Body summary -- word-boundary-trimmed extract of the full
+            description. Falls back to nothing if the scraper couldn't
+            find a description for this show. Line-clamped to 6 lines
+            so card heights stay reasonable; the full text is in the
+            modal. */}
+        {show.summary && (
+          <p className="text-gray-300 text-xs leading-snug line-clamp-6">
+            {show.summary}
+          </p>
+        )}
+
         {/* Times for the selected day(s) */}
         {hasDayTimes && (
           <div className="flex flex-wrap gap-1">

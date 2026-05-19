@@ -87,6 +87,8 @@ export default function App() {
       if (f.venue_slug) params.venue_slug = f.venue_slug;
       if (f.max_price !== "") params.max_price = f.max_price;
       if (f.min_rating !== "") params.min_rating = f.min_rating;
+      if (f.min_time) params.min_time = f.min_time;
+      if (f.max_time) params.max_time = f.max_time;
       if (f.free_only) params.free_only = true;
       if (f.accessible) params.accessible = true;
       if (datesArr && datesArr.length) params.dates = datesArr;

@@ -14,6 +14,7 @@ Endpoints:
 
 import asyncio
 import logging
+import textwrap
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Optional
@@ -175,6 +176,10 @@ class ShowSummary(BaseModel):
     venue_lat: Optional[float]
     venue_lng: Optional[float]
     min_price: Optional[float]
+    # Short word-boundary-trimmed extract of show.description; used as
+    # the card snippet on the list view so the user gets a sense of the
+    # show without having to open the modal.
+    summary: Optional[str] = None
     next_date: Optional[str]
     next_time: Optional[str]
     # Performance (date, time) pairs filtered to the selected date(s).
@@ -248,6 +253,14 @@ def _avg_rating(show: Show) -> Optional[float]:
     return round(sum(ratings) / len(ratings), 1) if ratings else None
 
 
+def _make_summary(text: Optional[str], max_chars: int = 440) -> Optional[str]:
+    """Word-boundary-trimmed extract of a description, suitable for the
+    card snippet on the list view. Returns None for empty input."""
+    if not text:
+        return None
+    return textwrap.shorten(text, width=max_chars, placeholder="…")
+
+
 def _show_summary(show: Show, on_dates: Optional[list[str]] = None) -> ShowSummary:
     if on_dates:
         times = _times_on_dates(show, on_dates)
@@ -274,6 +287,7 @@ def _show_summary(show: Show, on_dates: Optional[list[str]] = None) -> ShowSumma
         venue_lat=show.venue.lat if show.venue else None,
         venue_lng=show.venue.lng if show.venue else None,
         min_price=_min_price(show),
+        summary=_make_summary(show.description),
         next_date=next_date,
         next_time=next_time,
         times=times,
@@ -330,6 +344,8 @@ async def list_shows(
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
     min_rating: Optional[float] = None,
+    min_time: Optional[str] = None,
+    max_time: Optional[str] = None,
     free_only: bool = False,
     accessible: bool = False,
     sort: str = Query("next_date", pattern="^(next_date|title|price|rating)$"),
@@ -365,6 +381,14 @@ async def list_shows(
         filters.append(Performance.standard_price >= min_price)
     if max_price is not None:
         filters.append(Performance.standard_price <= max_price)
+    # Time filters target Performance.time directly. Times are stored
+    # as "HH:MM" strings; lexical comparison is correct for that format.
+    # Empty time strings naturally fall below "00:00" and are excluded
+    # when min_time is set, which is what we want.
+    if min_time:
+        filters.append(Performance.time >= min_time)
+    if max_time:
+        filters.append(Performance.time <= max_time)
     if accessible:
         filters.append(Show.accessibility_features != "[]")
 
@@ -470,6 +494,8 @@ async def list_reviews(
     venue_slug: Optional[str] = None,
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
+    min_time: Optional[str] = None,
+    max_time: Optional[str] = None,
     free_only: bool = False,
     accessible: bool = False,
     # Performance-date filter (Reviews tab clears this on entry, but the
@@ -530,6 +556,10 @@ async def list_reviews(
         perf_filters.append(Performance.standard_price >= min_price)
     if max_price is not None:
         perf_filters.append(Performance.standard_price <= max_price)
+    if min_time:
+        perf_filters.append(Performance.time >= min_time)
+    if max_time:
+        perf_filters.append(Performance.time <= max_time)
     if perf_filters:
         perf_exists = exists().where(
             and_(Performance.show_id == Show.id, *perf_filters)
