@@ -1,5 +1,5 @@
 import { format, parseISO } from "date-fns";
-import { MapPin, Clock, Ticket, Users, ExternalLink } from "lucide-react";
+import { MapPin, Clock, Ticket, Users, ExternalLink, Star } from "lucide-react";
 import GenreBadge from "./GenreBadge";
 import StarRating from "./StarRating";
 
@@ -26,7 +26,7 @@ function timePillLabel(item, multiDay) {
   }
 }
 
-export default function ShowCard({ show, onClick }) {
+export default function ShowCard({ show, onClick, isFavourite, onToggleFavourite }) {
   // When the user has selected one or more dates, the backend populates
   // `times` with every {date, time} for those days; we render those
   // instead of the single "next date · time" line.
@@ -82,6 +82,29 @@ export default function ShowCard({ show, onClick }) {
           <div className="absolute top-2 right-2 bg-green-500 text-white text-xs font-bold px-2 py-0.5 rounded-full">
             FREE
           </div>
+        )}
+        {/* Star toggle. Sits top-right when there's no FREE pill, or
+            shifts down a bit when FREE is shown so they don't overlap.
+            stopPropagation so the card's onClick (open modal) doesn't
+            fire on the same click. */}
+        {onToggleFavourite && (
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              onToggleFavourite(show.slug);
+            }}
+            title={isFavourite ? "Remove from My picks" : "Add to My picks"}
+            className={`absolute right-2 p-1.5 rounded-full bg-gray-950/60 backdrop-blur-sm border transition-colors ${
+              show.min_price === 0 ? "top-9" : "top-2"
+            } ${
+              isFavourite
+                ? "border-yellow-400 text-yellow-400"
+                : "border-gray-700 text-gray-300 hover:text-yellow-400 hover:border-yellow-400"
+            }`}
+          >
+            <Star size={14} fill={isFavourite ? "currentColor" : "none"} />
+          </button>
         )}
       </div>
 

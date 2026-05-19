@@ -1181,6 +1181,11 @@ async def run_scrape(
 
         sem = asyncio.Semaphore(CONCURRENCY)
         done = stats["skipped"]
+        # SQLite serialises writes; concurrent commits trip the "database
+        # is locked" error and we lose those shows. Hold this lock around
+        # just the DB-write phase so the (long, network-bound) HTML
+        # fetches stay parallel but commits go one at a time.
+        db_write_lock = asyncio.Lock()
 
         async def fetch_and_save(url: str):
             nonlocal done
@@ -1188,8 +1193,9 @@ async def run_scrape(
                 try:
                     data = await scrape_one(url, client)
                     if data:
-                        async with SessionLocal() as session:
-                            await upsert_show(session, data)
+                        async with db_write_lock:
+                            async with SessionLocal() as session:
+                                await upsert_show(session, data)
                         stats["scraped"] += 1
                     else:
                         stats["errors"] += 1

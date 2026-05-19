@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Search, Settings, X, List, Map as MapIcon, Landmark, Star } from "lucide-react";
+import { Search, Settings, X, List, Map as MapIcon, Landmark, Star, Heart } from "lucide-react";
 import ShowCard from "./components/ShowCard";
 import ShowModal from "./components/ShowModal";
 import FilterBar, { DEFAULT_FILTERS } from "./components/FilterBar";
@@ -7,7 +7,11 @@ import DateStrip from "./components/DateStrip";
 import MapView from "./components/MapView";
 import VenuesView from "./components/VenuesView";
 import ReviewsView from "./components/ReviewsView";
+import MyPicksView from "./components/MyPicksView";
+import VenueModal from "./components/VenueModal";
 import RefreshPanel from "./components/RefreshPanel";
+import { useFavourites } from "./lib/favourites";
+import { readSharePlan, clearSharePlanParams } from "./lib/sharePlan";
 import {
   fetchGenres,
   fetchVenues,
@@ -29,6 +33,7 @@ const VIEWS = [
   { value: "venues",  label: "Venues",  Icon: Landmark },
   { value: "map",     label: "Map",     Icon: MapIcon },
   { value: "reviews", label: "Reviews", Icon: Star },
+  { value: "picks",   label: "My picks", Icon: Heart },
 ];
 
 // Pick the date the user should land on: today if any shows play today,
@@ -52,7 +57,10 @@ export default function App() {
   const [showSettings, setSettings] = useState(false);
   const [searchQ, setSearchQ] = useState("");
   const [sort, setSort] = useState("next_date");
-  const [view, setView] = useState("list"); // "list" | "venues" | "map" | "reviews"
+  const [view, setView] = useState("list"); // "list" | "venues" | "map" | "reviews" | "picks"
+  const [selectedVenueSlug, setSelectedVenue] = useState(null);
+  const [shareToast, setShareToast] = useState("");
+  const { favourites, has, toggle, addMany, clear } = useFavourites();
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   // Empty array means "all upcoming"; populated array filters to those days.
   const [selectedDates, setSelectedDates] = useState([]);
@@ -118,6 +126,41 @@ export default function App() {
   useEffect(() => {
     loadMeta();
   }, [loadMeta]);
+
+  // On first load, see if the URL is carrying a shared plan (picks +
+  // dates + view). Adopt the picks into local favourites, switch to
+  // the requested view and date selection, then strip the params from
+  // the URL so a refresh doesn't re-apply.
+  useEffect(() => {
+    const plan = readSharePlan();
+    if (!plan.picks.length && !plan.dates.length && !plan.view) return;
+    const added = addMany(plan.picks);
+    if (plan.dates.length) setSelectedDates(plan.dates);
+    if (plan.view && VIEWS.some((v) => v.value === plan.view)) {
+      setView(plan.view);
+    }
+    clearSharePlanParams();
+    if (added > 0) {
+      setShareToast(
+        `Added ${added} share${added === 1 ? "d show" : "d shows"} to your picks.`
+      );
+    } else if (plan.picks.length) {
+      setShareToast("Shared picks are already in your list.");
+    }
+    setTimeout(() => setShareToast(""), 4500);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Opening a show or venue modal closes the other -- never stack two
+  // modals over each other.
+  function openShow(slug) {
+    setSelectedVenue(null);
+    setSelected(slug);
+  }
+  function openVenue(slug) {
+    setSelected(null);
+    setSelectedVenue(slug);
+  }
 
   // Reviews inherits the currently-selected date(s). In practice this
   // is what users want: "I'm planning Saturday — show me Saturday's
@@ -334,46 +377,86 @@ export default function App() {
           </div>
         )}
 
-        {/* Reviews has its own data fetch; render unconditionally. */}
+        {/* Reviews and My picks have their own data fetches; render
+            unconditionally. */}
         {view === "reviews" && (
           <ReviewsView
-            onSelectShow={setSelected}
+            onSelectShow={openShow}
             filters={filters}
             searchQ={searchQ}
             dateFilter={selectedDates}
           />
         )}
 
-        {view !== "reviews" && shows.length > 0 && (
+        {view === "picks" && (
+          <MyPicksView
+            favourites={favourites}
+            toggleFavourite={toggle}
+            clearFavourites={clear}
+            onSelectShow={openShow}
+            onSelectVenue={openVenue}
+            dateFilter={selectedDates}
+          />
+        )}
+
+        {view !== "reviews" && view !== "picks" && shows.length > 0 && (
           <>
             {view === "list" && (
               <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
                 {shows.map((show) => (
-                  <ShowCard key={show.slug} show={show} onClick={setSelected} />
+                  <ShowCard
+                    key={show.slug}
+                    show={show}
+                    onClick={openShow}
+                    isFavourite={has(show.slug)}
+                    onToggleFavourite={toggle}
+                  />
                 ))}
               </div>
             )}
             {view === "venues" && (
               <VenuesView
                 shows={shows}
-                onSelectShow={setSelected}
+                onSelectShow={openShow}
                 dateFilter={selectedDates}
               />
             )}
             {view === "map" && (
-              <MapView shows={shows} onSelectShow={setSelected} />
+              <MapView shows={shows} onSelectShow={openShow} />
             )}
           </>
         )}
       </main>
 
-      {/* Modal */}
+      {/* Show modal */}
       {selectedSlug && (
         <ShowModal
           slug={selectedSlug}
           dateFilter={selectedDates}
           onClose={() => setSelected(null)}
+          isFavourite={has(selectedSlug)}
+          onToggleFavourite={toggle}
+          onSelectVenue={openVenue}
         />
+      )}
+
+      {/* Venue modal */}
+      {selectedVenueSlug && (
+        <VenueModal
+          slug={selectedVenueSlug}
+          venues={venues}
+          onClose={() => setSelectedVenue(null)}
+          onSelectShow={openShow}
+          isFavourite={has}
+          onToggleFavourite={toggle}
+        />
+      )}
+
+      {/* Share-plan adoption toast */}
+      {shareToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 bg-fringe-pink text-white text-sm px-4 py-2 rounded-full shadow-lg">
+          {shareToast}
+        </div>
       )}
 
       {/* Snapshot footer in static mode so users know how fresh the data is */}

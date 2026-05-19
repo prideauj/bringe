@@ -22,7 +22,14 @@ function formatDate(dateStr, timeStr) {
   }
 }
 
-export default function ShowModal({ slug, dateFilter = [], onClose }) {
+export default function ShowModal({
+  slug,
+  dateFilter = [],
+  onClose,
+  isFavourite,
+  onToggleFavourite,
+  onSelectVenue,
+}) {
   const [show, setShow] = useState(null);
   const [loading, setLoading] = useState(true);
   const [showAllDates, setShowAllDates] = useState(false);
@@ -82,6 +89,23 @@ export default function ShowModal({ slug, dateFilter = [], onClose }) {
                 <div className="flex flex-wrap items-center gap-2 mb-2">
                   <GenreBadge genre={show.genre} />
                   {avgRating && <StarRating rating={avgRating} count={show.reviews.length} />}
+                  {onToggleFavourite && (
+                    <button
+                      type="button"
+                      onClick={() => onToggleFavourite(show.slug)}
+                      className={`ml-auto flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-semibold transition-colors ${
+                        isFavourite
+                          ? "border-yellow-400 bg-yellow-400/10 text-yellow-400"
+                          : "border-gray-700 text-gray-400 hover:border-yellow-400 hover:text-yellow-400"
+                      }`}
+                    >
+                      <Star
+                        size={13}
+                        fill={isFavourite ? "currentColor" : "none"}
+                      />
+                      {isFavourite ? "In my picks" : "Add to picks"}
+                    </button>
+                  )}
                 </div>
                 <h2 className="text-2xl font-bold text-white">{show.title}</h2>
                 {show.company && (
@@ -100,6 +124,7 @@ export default function ShowModal({ slug, dateFilter = [], onClose }) {
                   <VenueCard
                     venue={show.venue}
                     onGeocoded={(v) => setShow({ ...show, venue: v })}
+                    onSelectVenue={onSelectVenue}
                   />
                 )}
                 {show.duration_minutes && (
@@ -392,7 +417,7 @@ function TimesForSelected({ show, dateFilter }) {
 //   - No coords: click asks the backend to geocode the venue (which will
 //     scrape the venue page for an address first), then auto-opens the
 //     mini-map with the new coordinates.
-function VenueCard({ venue, onGeocoded }) {
+function VenueCard({ venue, onGeocoded, onSelectVenue }) {
   const [locating, setLocating] = useState(false);
   const [err, setErr] = useState(null);
   const [mapOpen, setMapOpen] = useState(false);
@@ -508,6 +533,18 @@ function VenueCard({ venue, onGeocoded }) {
             <Marker position={[venue.lat, venue.lng]} icon={DEFAULT_ICON} />
           </MapContainer>
         </div>
+      )}
+
+      {/* Deep-link into the venue page: full address, larger map, every
+          show at this venue across the festival. */}
+      {onSelectVenue && venue.slug && (
+        <button
+          type="button"
+          onClick={() => onSelectVenue(venue.slug)}
+          className="mt-2 text-xs text-fringe-pink hover:underline self-start"
+        >
+          All shows at this venue →
+        </button>
       )}
     </div>
   );

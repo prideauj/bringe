@@ -57,6 +57,18 @@ async def _cleanup_bad_venues(conn):
 
 async def init_db():
     async with engine.begin() as conn:
+        # WAL = write-ahead log. Lets concurrent readers proceed without
+        # blocking the writer (and vice versa). The scraper's many
+        # parallel sessions occasionally still race on the writer, but
+        # WAL turns "database is locked" errors from "almost guaranteed"
+        # into "rare under heavy contention". Combined with the
+        # asyncio.Lock around the write phase in scraper.py, it stops
+        # the lock errors entirely.
+        await conn.exec_driver_sql("PRAGMA journal_mode=WAL")
+        await conn.exec_driver_sql("PRAGMA synchronous=NORMAL")
+        # busy_timeout makes SQLite wait up to N ms for a lock to clear
+        # before raising OperationalError. 5s is generous.
+        await conn.exec_driver_sql("PRAGMA busy_timeout=5000")
         await conn.run_sync(Base.metadata.create_all)
         await _ensure_columns(conn)
         await _cleanup_bad_venues(conn)
