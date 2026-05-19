@@ -31,3 +31,12 @@ frontend/dist/
 Thumbs.db
 *.swp
 *.swo
+
+# Claude Code agent state (per-machine permission list etc).
+.claude/
+
+# One-off debug artifacts saved at the repo root during scraper /
+# filter diagnosis. The static snapshot lives under
+# frontend/public/data/ -- nothing else of that name should be tracked.
+/shows_theatre.json
+/*.debug.json
