@@ -63,6 +63,11 @@ if "%DO_SNAPSHOT%"=="1" (
     call "%VENV_DIR%\Scripts\activate.bat"
     python "%REPO%\backend\export_static.py"
     if errorlevel 1 goto :err_export
+    if exist "%REPO%\frontend\public\data\manifest.json" (
+        echo   Snapshot manifest:
+        type "%REPO%\frontend\public\data\manifest.json"
+        echo.
+    )
     echo.
 ) else (
     echo [1/5] Skipping snapshot refresh ^(/nosnapshot^).
