@@ -4,27 +4,32 @@ setlocal EnableDelayedExpansion
 :: ============================================================
 ::  Bringe -- publish to git (triggers Render auto-deploy)
 ::
-::  Workflow:
-::    1. Refresh the static snapshot from the local SQLite DB.
-::       (Unless /nosnapshot is passed -- code-only commits.)
-::    2. git add -A   (.gitignore excludes backend/*.db, node_modules
-::                     and package-lock so this is safe.)
-::    3. Show pending changes for sanity.
-::    4. git commit -m <message>
-::    5. git push
+::  Steps:
+::    [1/5] Refresh the static snapshot from local SQLite.
+::          (skip with /nosnapshot for code-only commits)
+::    [2/5] Untrack any committed files that the *current* .gitignore
+::          marks as ignored.  Files added to the index before the
+::          .gitignore was updated stay tracked forever otherwise --
+::          this is the reason .venv contents kept showing up on
+::          GitHub even after the ignore rules were added.
+::    [3/5] Stage outstanding changes (git add -A).
+::    [4/5] Print pending changes and ask for confirmation.
+::    [5/5] Commit + push.  Auto-falls-back to `git push -u origin
+::          <branch>` if no upstream is configured.
 ::
 ::  Usage:
 ::    push.bat                       prompts for a commit message
 ::    push.bat "your message"        uses that message
 ::    push.bat /nosnapshot "msg"     skips the snapshot refresh
 ::
-::  Render is watching the remote branch; once the push lands it
+::  Render watches the remote branch; once the push lands it
 ::  rebuilds and ships within ~30 seconds.
 :: ============================================================
 
 set "REPO=%~dp0"
 if "%REPO:~-1%"=="\" set "REPO=%REPO:~0,-1%"
 cd /d "%REPO%"
+set "REPO_FWD=%REPO:\=/%"
 
 set "LOCAL_BASE=%LOCALAPPDATA%\bringe"
 set "VENV_DIR=%LOCAL_BASE%\backend-venv"
@@ -39,59 +44,112 @@ if /i "%~1"=="/nosnapshot" (
     set "MSG=%~1"
 )
 
-if "%MSG%"=="" (
-    set /p MSG="Commit message: "
-)
-if "%MSG%"=="" goto :err_no_msg
-
 :: ---- preflight ----
 where git >nul 2>&1
 if errorlevel 1 goto :err_no_git
 if not exist "%REPO%\.git" goto :err_no_repo
 
+:: Trust GDrive path (idempotent; needed because GDrive's drive
+:: doesn't record ownership and git refuses by default).
+git config --global --add safe.directory "%REPO_FWD%" >nul 2>&1
+
 :: ============================================================
-:: [1/4] Refresh snapshot (optional)
+:: [1/5] Refresh snapshot
 :: ============================================================
 if "%DO_SNAPSHOT%"=="1" (
     if not exist "%VENV_DIR%\Scripts\python.exe" goto :err_venv
     if not exist "%REPO%\backend\export_static.py" goto :err_no_export
-    echo [1/4] Refreshing snapshot from local DB ...
+    echo [1/5] Refreshing snapshot from local DB ...
     call "%VENV_DIR%\Scripts\activate.bat"
     python "%REPO%\backend\export_static.py"
     if errorlevel 1 goto :err_export
     echo.
 ) else (
-    echo [1/4] Skipping snapshot refresh ^(/nosnapshot^).
+    echo [1/5] Skipping snapshot refresh ^(/nosnapshot^).
     echo.
 )
 
 :: ============================================================
-:: [2/4] Stage everything
+:: [2/5] Untrack files that .gitignore now excludes
 :: ============================================================
-:: GDrive's drive doesn't record POSIX-style ownership, so git's
-:: safe.directory check refuses to operate on this repo by default.
-:: Whitelist this directory globally before staging. The command is
-:: idempotent (git skips duplicate entries) so running it every time
-:: is harmless. We pass the path with forward slashes because that's
-:: the form git's own "How to fix" message uses.
-set "REPO_FWD=%REPO:\=/%"
-git config --global --add safe.directory "%REPO_FWD%" >nul 2>&1
+:: First sweep: bulk removal of the known-large directories. These
+:: are the usual culprits when the repo looks bloated on GitHub.
+:: `git rm --cached` only updates the index -- working tree files
+:: are left alone.
+echo [2/5] Untracking files matching .gitignore ...
+set "UNTRACKED_ANY=0"
 
-echo [2/4] Staging changes ...
+for %%P in (
+    backend\.venv
+    frontend\node_modules
+    frontend\dist
+) do (
+    if exist "%REPO%\%%P" (
+        git ls-files --error-unmatch -- "%%P" >nul 2>&1
+        if !errorlevel! equ 0 (
+            echo   - untracking %%P\
+            git rm -r --cached --quiet -- "%%P" >nul 2>&1
+            set "UNTRACKED_ANY=1"
+        )
+    )
+)
+
+:: SQLite DB files and the lockfile -- single files, not dirs.
+for %%F in (
+    backend\bringe.db
+    backend\bringe.db-journal
+    backend\bringe.db-wal
+    backend\bringe.db-shm
+    frontend\package-lock.json
+) do (
+    git ls-files --error-unmatch -- "%%F" >nul 2>&1
+    if !errorlevel! equ 0 (
+        echo   - untracking %%F
+        git rm --cached --quiet -- "%%F" >nul 2>&1
+        set "UNTRACKED_ANY=1"
+    )
+)
+
+:: Second sweep: thorough catch-all. `git ls-files -ci
+:: --exclude-standard` lists every currently-tracked file that
+:: matches a .gitignore rule. Anything the hard-coded list above
+:: missed (or that the .gitignore later starts excluding) is
+:: removed here. Output is sent through a temp file because piping
+:: a `for /f` to `git rm` is fragile under cmd.
+set "IGNORED_FILE=%TEMP%\bringe_ignored_tracked.txt"
+git ls-files -ci --exclude-standard > "%IGNORED_FILE%" 2>nul
+
+set "EXTRA_COUNT=0"
+for /f %%c in ('type "%IGNORED_FILE%" 2^>nul ^| find /v /c ""') do set "EXTRA_COUNT=%%c"
+if not "%EXTRA_COUNT%"=="0" (
+    echo   - untracking %EXTRA_COUNT% additional file^(s^) flagged by .gitignore
+    for /f "usebackq tokens=*" %%f in ("%IGNORED_FILE%") do (
+        git rm --cached --quiet -- "%%f" >nul 2>&1
+    )
+    set "UNTRACKED_ANY=1"
+)
+del "%IGNORED_FILE%" 2>nul
+
+if "%UNTRACKED_ANY%"=="0" echo   None found.
+echo.
+
+:: ============================================================
+:: [3/5] Stage outstanding changes
+:: ============================================================
+echo [3/5] Staging changes ...
 git add -A
 if errorlevel 1 goto :err_git_add
 
 :: ============================================================
-:: [3/4] Show what's about to be committed
+:: [4/5] Show + confirm
 :: ============================================================
 echo.
-echo [3/4] Pending changes:
+echo [4/5] Pending changes:
 echo --------------------------------------------
 git status -s
 echo --------------------------------------------
 echo.
 
-:: Bail early if nothing changed.
 git diff --cached --quiet
 if not errorlevel 1 (
     echo Nothing to commit. Working tree is clean.
@@ -99,18 +157,28 @@ if not errorlevel 1 (
     exit /b 0
 )
 
+if "%MSG%"=="" set /p MSG="Commit message: "
+if "%MSG%"=="" goto :err_no_msg
+
 set /p CONFIRM="Proceed with commit and push? [Y/n] "
 if /i "!CONFIRM!"=="n" goto :cancel
 
 :: ============================================================
-:: [4/4] Commit + push
+:: [5/5] Commit + push (with upstream auto-fallback)
 :: ============================================================
 echo.
-echo [4/4] Committing and pushing ...
+echo [5/5] Committing ...
 git commit -m "%MSG%"
 if errorlevel 1 goto :err_commit
-git push
-if errorlevel 1 goto :err_push
+
+echo Pushing ...
+git push 2>nul
+if errorlevel 1 (
+    echo   No upstream configured -- retrying with `-u origin ^<branch^>`.
+    for /f "tokens=*" %%b in ('git rev-parse --abbrev-ref HEAD') do set "BRANCH=%%b"
+    git push -u origin !BRANCH!
+    if errorlevel 1 goto :err_push
+)
 
 echo.
 echo ============================================
@@ -174,8 +242,9 @@ exit /b 1
 
 :err_push
 echo.
-echo ERROR: git push failed.
-echo Common causes: no upstream branch, network, auth.
-echo Try `git push -u origin main` once manually to set the upstream.
+echo ERROR: git push failed even with `-u origin`.
+echo Common causes: network down, auth failure, branch name mismatch
+echo on the remote. Try `git push -u origin main` manually to see the
+echo full error message.
 pause
 exit /b 1
