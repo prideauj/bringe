@@ -2,13 +2,24 @@ services:
   - type: web
     runtime: static
     name: bringe
+    # Watch the GitHub `main` branch -- when the service was created it
+    # defaulted to `master`, which silently diverged once `push.bat`
+    # started pushing to `main` and Render kept serving stale commits.
+    branch: main
     # Build:
     #   - cd into the launch pad's package install? No -- on Render we don't
     #     have the GDrive/local split. We install deps and build straight
     #     out of frontend/. The static-mode flag is set at build time so
     #     api.js routes every read at the JSON snapshot under /data/.
     rootDir: frontend
-    buildCommand: npm ci && VITE_STATIC_MODE=1 npm run build
+    # `npm install` rather than `npm ci`: the project's local-dev setup
+    # gitignores frontend/package-lock.json (the lockfile lives in the
+    # launch pad on the developer's machine, alongside node_modules).
+    # Without a lockfile in the repo, `npm ci` errors out and Render
+    # keeps serving the previous deploy. `npm install` resolves deps
+    # from package.json without requiring a lockfile -- slightly slower
+    # and less perfectly reproducible than `ci`, but works.
+    buildCommand: npm install && VITE_STATIC_MODE=1 npm run build
     staticPublishPath: ./dist
     # Render does not auto-fall-through to index.html on unmatched routes
     # for static sites. Bringe is a SPA, so we configure that explicitly.
