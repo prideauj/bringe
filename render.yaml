@@ -1,0 +1,31 @@
+services:
+  - type: web
+    runtime: static
+    name: bringe
+    # Build:
+    #   - cd into the launch pad's package install? No -- on Render we don't
+    #     have the GDrive/local split. We install deps and build straight
+    #     out of frontend/. The static-mode flag is set at build time so
+    #     api.js routes every read at the JSON snapshot under /data/.
+    rootDir: frontend
+    buildCommand: npm ci && VITE_STATIC_MODE=1 npm run build
+    staticPublishPath: ./dist
+    # Render does not auto-fall-through to index.html on unmatched routes
+    # for static sites. Bringe is a SPA, so we configure that explicitly.
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    headers:
+      # Long-cache the JSON snapshots: they only change on a fresh deploy,
+      # at which point the file names are still the same but Render serves
+      # fresh ones. If you want clients to re-download immediately, do a
+      # cache-busted file naming scheme; for festival data twice-a-day-
+      # fresh is fine.
+      - path: /data/*
+        name: Cache-Control
+        value: public, max-age=900
+      # Asset files have content-hashed names, so cache them aggressively.
+      - path: /assets/*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable

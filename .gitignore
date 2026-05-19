@@ -1,0 +1,33 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+
+# Virtual environments (the real venv lives at %LOCALAPPDATA%\bringe; any
+# .venv inside the repo is a stray local artifact and should NOT be
+# committed -- it pulls in hundreds of MB of platform-specific binaries).
+.venv/
+backend/.venv/
+venv/
+
+# Database (local data, not code)
+backend/*.db
+backend/*.db-journal
+backend/*.db-wal
+backend/*.db-shm
+
+# These live on local disk -- junctions/symlinks should not be committed
+frontend/node_modules
+frontend/package-lock.json
+
+# Vite build output
+frontend/dist/
+
+# Editor / OS metadata
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
